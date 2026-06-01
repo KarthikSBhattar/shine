@@ -7,6 +7,7 @@ on:
     paths:
       - "packages/issuer/**"
       - "packages/shared/**"
+      - ".github/workflows/issuer.yml"
 
 permissions:
   contents: write
