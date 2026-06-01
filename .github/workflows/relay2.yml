@@ -8,6 +8,8 @@ on:
       - "packages/relay2/**"
       - "packages/shared/**"
       - "deno.jsonc"
+      - "netlify/**"
+      - "netlify.toml"
       - ".github/workflows/relay2.yml"
 
 permissions:
@@ -30,7 +32,9 @@ jobs:
           deno-version: v2.x
 
       - name: Install dependencies
-        run: deno install
+        run: |
+          deno install
+          npm install --package-lock=false
 
       - name: Type-check relay2
         run: deno check packages/relay2/src/main.ts
@@ -38,40 +42,50 @@ jobs:
       - name: Bundle and compute hash
         id: build
         run: |
-          # Hash the source tree as the canonical identifier when bundle isn't available
           HASH=$(
             {
               find packages/relay2/src packages/shared/src -type f -name '*.ts'
-              printf '%s\n' packages/relay2/deno.json deno.jsonc
+              find netlify -type f
+              printf '%s\n' packages/relay2/deno.json deno.jsonc netlify.toml
             } | sort | xargs sha256sum | sha256sum | awk '{print $1}'
           )
           echo "hash=$HASH" >> "$GITHUB_OUTPUT"
 
-      - name: Set relay2 runtime hash
+      - name: Inject relay2 runtime hash
         run: |
-          deno deploy env add BUNDLE_HASH "${{ steps.build.outputs.hash }}" \
-            --org karthiksbhattar \
-            --app shine-relay2-live || \
-          deno deploy env update-value BUNDLE_HASH "${{ steps.build.outputs.hash }}" \
-            --org karthiksbhattar \
-            --app shine-relay2-live
-        env:
-          DENO_DEPLOY_TOKEN: ${{ secrets.DENO_DEPLOY_TOKEN }}
+          node --input-type=module - <<'NODE'
+          import fs from "node:fs";
 
-      - name: Deploy to Deno Deploy
-        run: |
-          deno deploy . \
-            --org karthiksbhattar \
-            --app shine-relay2-live \
-            --prod
+          const path = "netlify/functions/relay2.ts";
+          const text = fs.readFileSync(path, "utf8");
+          fs.writeFileSync(
+            path,
+            text.replace("__SHINE_RELAY2_BUILD_HASH__", process.env.RELAY_HASH),
+          );
+          NODE
         env:
-          DENO_DEPLOY_TOKEN: ${{ secrets.DENO_DEPLOY_TOKEN }}
+          RELAY_HASH: ${{ steps.build.outputs.hash }}
+
+      - name: Deploy to Netlify
+        run: |
+          npx --yes netlify-cli deploy \
+            --prod \
+            --dir public \
+            --functions netlify/functions \
+            --site "$NETLIFY_SITE_ID" \
+            --auth "$NETLIFY_AUTH_TOKEN"
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
 
       - name: Verify deployed hash
         run: |
           deno eval '
-            const url = "https://shine-relay2-live.karthiksbhattar.deno.net/healthz";
+            const baseUrl = Deno.env.get("NETLIFY_RELAY2_URL");
+            if (!baseUrl) throw new Error("Missing NETLIFY_RELAY2_URL secret");
+            const url = `${baseUrl.replace(/\/$/, "")}/healthz`;
             const expected = Deno.env.get("RELAY_HASH");
+            if (!expected) throw new Error("Missing RELAY_HASH");
             const res = await fetch(url);
             if (!res.ok) throw new Error(`healthz failed: ${res.status}`);
             const body = await res.json();
@@ -81,10 +95,12 @@ jobs:
           '
         env:
           RELAY_HASH: ${{ steps.build.outputs.hash }}
+          NETLIFY_RELAY2_URL: ${{ secrets.NETLIFY_RELAY2_URL }}
 
       - name: Append to transparency log
         run: |
           set -euo pipefail
+          git restore netlify/functions/relay2.ts
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git fetch origin transparency-log:refs/remotes/origin/transparency-log 2>/dev/null || true
@@ -94,10 +110,10 @@ jobs:
             git checkout --orphan transparency-log
             git rm -rf . >/dev/null 2>&1 || true
           fi
-          ENTRY=$(node - <<'NODE'
+          ENTRY=$(node --input-type=module - <<'NODE'
           const entry = {
             relay: "relay2",
-            url: "https://shine-relay2-live.karthiksbhattar.deno.net",
+            url: process.env.NETLIFY_RELAY2_URL,
             commit: process.env.GITHUB_SHA,
             hash: process.env.RELAY_HASH,
             hash_algorithm: "sha256",
@@ -117,3 +133,4 @@ jobs:
           git push origin transparency-log
         env:
           RELAY_HASH: ${{ steps.build.outputs.hash }}
+          NETLIFY_RELAY2_URL: ${{ secrets.NETLIFY_RELAY2_URL }}

@@ -7,6 +7,7 @@ Users can verify that the deployed relay is a publicly logged build:
 
 ```sh
 SHINE_TRANSPARENCY_LOG_URL="https://raw.githubusercontent.com/<owner>/<repo>/transparency-log/transparency-log.jsonl" \
+SHINE_RELAY2_URL="https://<your-netlify-site>.netlify.app" \
 deno run --allow-net --allow-env scripts/verify-relays.ts
 ```
 
@@ -15,6 +16,7 @@ To pin to the exact source commit your client was built against:
 ```sh
 SHINE_EXPECTED_COMMIT="<git-sha>" \
 SHINE_TRANSPARENCY_LOG_URL="https://raw.githubusercontent.com/<owner>/<repo>/transparency-log/transparency-log.jsonl" \
+SHINE_RELAY2_URL="https://<your-netlify-site>.netlify.app" \
 deno run --allow-net --allow-env scripts/verify-relays.ts
 ```
 
@@ -27,3 +29,8 @@ The transparency entry format is JSON Lines:
 This proves only that the relay reports a hash that CI logged for a source
 commit. It does not prove the hosting provider keeps no logs, and it does not
 prevent traffic correlation if one operator controls both relays.
+
+Relay2 is deployed as a Netlify serverless function. The Relay2 workflow needs
+`NETLIFY_AUTH_TOKEN`, `NETLIFY_SITE_ID`, and `NETLIFY_RELAY2_URL` GitHub
+secrets. The deployed Netlify function must also have the Relay2 key and auth
+environment variables configured in Netlify.
