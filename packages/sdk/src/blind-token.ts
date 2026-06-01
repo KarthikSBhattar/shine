@@ -2,26 +2,27 @@
 // The issuer never sees the plaintext nonce — only the blinded message.
 // After unblinding, the final signature is verifiable with standard RSA-PSS.
 import { b64uDecode, b64uEncode } from "../../shared/src/crypto.ts";
+import { os2ip, rsaBlind, rsaUnblind } from "../../shared/src/rsa-blind.ts";
 import {
-  os2ip,
-  rsaBlind,
-  rsaUnblind,
-} from "../../shared/src/rsa-blind.ts";
-import {
-  BLIND_TOKEN_PREFIX,
-  BLIND_SIG_BYTES,
   BLIND_NONCE_BYTES,
+  BLIND_SIG_BYTES,
+  BLIND_TOKEN_EPOCH_SECONDS,
+  BLIND_TOKEN_PAYLOAD_BYTES,
+  BLIND_TOKEN_PREFIX,
+  BLIND_TOKEN_VERSION,
 } from "../../shared/src/types.ts";
 
 export interface BlindTokenConfig {
-  issuerUrl: string;       // e.g. "https://shine-issuer.workers.dev"
-  authCredential: string;  // Bearer token for POST /blind-sign
+  issuerUrl: string; // e.g. "https://shine-issuer.workers.dev"
+  authCredential: string; // Bearer token for POST /blind-sign
 }
 
 // Cached per SDK instance — the issuer's public key changes infrequently
 let _cachedKey: { n: bigint; e: bigint } | null = null;
 
-export async function fetchIssuerPublicKey(config: BlindTokenConfig): Promise<void> {
+export async function fetchIssuerPublicKey(
+  config: BlindTokenConfig,
+): Promise<void> {
   const resp = await fetch(`${config.issuerUrl}/issuer-key`);
   if (!resp.ok) throw new Error(`Issuer key fetch failed: ${resp.status}`);
   const jwk = await resp.json() as JsonWebKey;
@@ -45,14 +46,21 @@ export async function fetchIssuerPublicKey(config: BlindTokenConfig): Promise<vo
 // 3. Sends the blind message to the issuer for signing
 // 4. Unblinds the response to get a standard RSA-PSS signature over the nonce
 // 5. Returns a token string for the x-shine-token header
-export async function obtainBlindToken(config: BlindTokenConfig): Promise<string> {
+export async function obtainBlindToken(
+  config: BlindTokenConfig,
+): Promise<string> {
   if (!_cachedKey) await fetchIssuerPublicKey(config);
   const { n, e } = _cachedKey!;
 
   const nonce = crypto.getRandomValues(new Uint8Array(BLIND_NONCE_BYTES));
+  const payload = new Uint8Array(BLIND_TOKEN_PAYLOAD_BYTES);
+  const epoch = Math.floor(Date.now() / 1000 / BLIND_TOKEN_EPOCH_SECONDS);
+  payload[0] = BLIND_TOKEN_VERSION;
+  new DataView(payload.buffer).setUint32(1, epoch, false);
+  payload.set(nonce, 5);
 
-  // rsaBlind: PSS-encodes nonce, then blinds with random r
-  const { blindMsg, r } = await rsaBlind(nonce, e, n);
+  // rsaBlind: PSS-encodes the short-lived token payload, then blinds with random r
+  const { blindMsg, r } = await rsaBlind(payload, e, n);
 
   const resp = await fetch(`${config.issuerUrl}/blind-sign`, {
     method: "POST",
@@ -66,16 +74,20 @@ export async function obtainBlindToken(config: BlindTokenConfig): Promise<string
 
   const body = await resp.json() as { blind_sig: string };
   const blindSig = b64uDecode(body.blind_sig);
-  if (blindSig.length !== BLIND_SIG_BYTES) throw new Error("Invalid blind_sig length");
+  if (blindSig.length !== BLIND_SIG_BYTES) {
+    throw new Error("Invalid blind_sig length");
+  }
 
   // Unblind: sig = blind_sig * r^{-1} mod n
   // The resulting sig passes Web Crypto RSA-PSS verify over nonce
   const sig = rsaUnblind(blindSig, r, n);
 
-  return BLIND_TOKEN_PREFIX + b64uEncode(nonce) + "." + b64uEncode(sig);
+  return BLIND_TOKEN_PREFIX + b64uEncode(payload) + "." + b64uEncode(sig);
 }
 
 export interface BlindTokenParts {
+  version: number;
+  epoch: number;
   nonce: Uint8Array;
   sig: Uint8Array;
 }
@@ -87,8 +99,15 @@ export function parseBlindToken(tokenHeader: string): BlindTokenParts {
   const rest = tokenHeader.slice(BLIND_TOKEN_PREFIX.length);
   const lastDot = rest.lastIndexOf(".");
   if (lastDot < 1) throw new Error("Malformed blind token");
+  const payload = b64uDecode(rest.slice(0, lastDot));
+  if (payload.length !== BLIND_TOKEN_PAYLOAD_BYTES) {
+    throw new Error("Invalid blind token payload length");
+  }
   return {
-    nonce: b64uDecode(rest.slice(0, lastDot)),
-    sig:   b64uDecode(rest.slice(lastDot + 1)),
+    version: payload[0]!,
+    epoch: new DataView(payload.buffer, payload.byteOffset, payload.byteLength)
+      .getUint32(1, false),
+    nonce: payload.slice(5),
+    sig: b64uDecode(rest.slice(lastDot + 1)),
   };
 }

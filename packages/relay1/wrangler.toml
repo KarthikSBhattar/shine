@@ -7,9 +7,15 @@ account_id = "9c7d20521f1e9099f117c083bba1db4e"
 [vars]
 RELAY2_URL     = "https://shine-relay2-live.karthiksbhattar.deno.net"
 ISSUER_URL     = "https://shine-issuer.workers.dev"
-REQUIRE_TOKEN  = "false"   # set to "true" once the issuer is deployed
-TOKEN_MODE     = "any"     # "hmac" | "blind" | "any" (accepts either)
+REQUIRE_TOKEN  = "true"
+TOKEN_MODE     = "blind"   # "hmac" | "blind" | "any" (accepts either)
 BUNDLE_HASH    = ""        # injected by CI
+
+[observability]
+enabled = false
+
+[observability.logs]
+invocation_logs = false
 
 # Secrets — set via `wrangler secret put <NAME>`:
 #   RELAY1_PRIVATE_KEY_JWK   — from `deno run scripts/keygen.ts`
