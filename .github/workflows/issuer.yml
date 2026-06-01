@@ -11,6 +11,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: transparency-log
+  cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -57,7 +61,7 @@ jobs:
       - name: Verify deployed hash
         run: |
           node - <<'NODE'
-          const url = "https://shine-issuer.workers.dev/healthz";
+          const url = "https://shine-issuer.ksb6007.workers.dev/healthz";
           const expected = "${{ steps.build.outputs.hash }}";
           const res = await fetch(url);
           if (!res.ok) throw new Error(`healthz failed: ${res.status}`);
@@ -69,14 +73,22 @@ jobs:
 
       - name: Append to transparency log
         run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git fetch origin transparency-log 2>/dev/null || true
-          git checkout transparency-log 2>/dev/null || git checkout --orphan transparency-log
+          git fetch origin transparency-log:refs/remotes/origin/transparency-log 2>/dev/null || true
+          if git show-ref --verify --quiet refs/remotes/origin/transparency-log; then
+            git checkout -B transparency-log origin/transparency-log
+          else
+            git checkout --orphan transparency-log
+            git rm -rf . >/dev/null 2>&1 || true
+          fi
           ENTRY=$(printf '{"relay":"issuer","commit":"%s","hash":"%s","timestamp":"%s"}\n' \
             "$GITHUB_SHA" "${{ steps.build.outputs.hash }}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)")
+          touch transparency-log.jsonl
+          grep -v "\"relay\":\"issuer\".*\"commit\":\"$GITHUB_SHA\"" transparency-log.jsonl > transparency-log.jsonl.tmp || true
+          mv transparency-log.jsonl.tmp transparency-log.jsonl
           echo "$ENTRY" >> transparency-log.jsonl
           git add transparency-log.jsonl
           git commit -m "log: issuer ${{ github.sha }}"
           git push origin transparency-log
-          git checkout main

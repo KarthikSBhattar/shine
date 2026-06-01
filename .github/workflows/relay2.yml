@@ -13,6 +13,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: transparency-log
+  cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -83,8 +87,13 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git fetch origin transparency-log 2>/dev/null || true
-          git checkout transparency-log 2>/dev/null || git checkout --orphan transparency-log
+          git fetch origin transparency-log:refs/remotes/origin/transparency-log 2>/dev/null || true
+          if git show-ref --verify --quiet refs/remotes/origin/transparency-log; then
+            git checkout -B transparency-log origin/transparency-log
+          else
+            git checkout --orphan transparency-log
+            git rm -rf . >/dev/null 2>&1 || true
+          fi
           ENTRY=$(node - <<'NODE'
           const entry = {
             relay: "relay2",

@@ -6,7 +6,7 @@ account_id = "9c7d20521f1e9099f117c083bba1db4e"
 
 [vars]
 RELAY2_URL     = "https://shine-relay2-live.karthiksbhattar.deno.net"
-ISSUER_URL     = "https://shine-issuer.workers.dev"
+ISSUER_URL     = "https://shine-issuer.ksb6007.workers.dev"
 REQUIRE_TOKEN  = "true"
 TOKEN_MODE     = "blind"   # "hmac" | "blind" | "any" (accepts either)
 BUNDLE_HASH    = ""        # injected by CI
