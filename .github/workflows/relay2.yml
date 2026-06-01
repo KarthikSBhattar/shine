@@ -1,0 +1,107 @@
+name: Deploy Relay2
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "packages/relay2/**"
+      - "packages/shared/**"
+      - "deno.jsonc"
+      - ".github/workflows/relay2.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Type-check relay2
+        run: deno check packages/relay2/src/main.ts
+
+      - name: Bundle and compute hash
+        id: build
+        run: |
+          # Hash the source tree as the canonical identifier when bundle isn't available
+          HASH=$(
+            {
+              find packages/relay2/src packages/shared/src -type f -name '*.ts'
+              printf '%s\n' packages/relay2/deno.json deno.jsonc
+            } | sort | xargs sha256sum | sha256sum | awk '{print $1}'
+          )
+          echo "hash=$HASH" >> "$GITHUB_OUTPUT"
+
+      - name: Set relay2 runtime hash
+        run: |
+          deno deploy env add BUNDLE_HASH "${{ steps.build.outputs.hash }}" \
+            --org karthiksbhattar \
+            --app shine-relay2-live || \
+          deno deploy env update-value BUNDLE_HASH "${{ steps.build.outputs.hash }}" \
+            --org karthiksbhattar \
+            --app shine-relay2-live
+        env:
+          DENO_DEPLOY_TOKEN: ${{ secrets.DENO_DEPLOY_TOKEN }}
+
+      - name: Deploy to Deno Deploy
+        run: |
+          deno deploy . \
+            --org karthiksbhattar \
+            --app shine-relay2-live \
+            --prod
+        env:
+          DENO_DEPLOY_TOKEN: ${{ secrets.DENO_DEPLOY_TOKEN }}
+
+      - name: Verify deployed hash
+        run: |
+          deno eval '
+            const url = "https://shine-relay2-live.karthiksbhattar.deno.net/healthz";
+            const expected = Deno.env.get("RELAY_HASH");
+            const res = await fetch(url);
+            if (!res.ok) throw new Error(`healthz failed: ${res.status}`);
+            const body = await res.json();
+            if (body.hash !== expected) {
+              throw new Error(`relay2 hash mismatch: healthz=${body.hash} expected=${expected}`);
+            }
+          '
+        env:
+          RELAY_HASH: ${{ steps.build.outputs.hash }}
+
+      - name: Append to transparency log
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin transparency-log 2>/dev/null || true
+          git checkout transparency-log 2>/dev/null || git checkout --orphan transparency-log
+          ENTRY=$(node - <<'NODE'
+          const entry = {
+            relay: "relay2",
+            url: "https://shine-relay2-live.karthiksbhattar.deno.net",
+            commit: process.env.GITHUB_SHA,
+            hash: process.env.RELAY_HASH,
+            hash_algorithm: "sha256",
+            source_repository: process.env.GITHUB_REPOSITORY,
+            workflow_run_id: process.env.GITHUB_RUN_ID,
+            timestamp: new Date().toISOString(),
+          };
+          console.log(JSON.stringify(entry));
+          NODE
+          )
+          touch transparency-log.jsonl
+          grep -v "\"relay\":\"relay2\".*\"commit\":\"$GITHUB_SHA\"" transparency-log.jsonl > transparency-log.jsonl.tmp || true
+          mv transparency-log.jsonl.tmp transparency-log.jsonl
+          echo "$ENTRY" >> transparency-log.jsonl
+          git add transparency-log.jsonl
+          git commit -m "log: relay2 $GITHUB_SHA"
+          git push origin transparency-log
+        env:
+          RELAY_HASH: ${{ steps.build.outputs.hash }}

@@ -1,0 +1,16 @@
+name = "shine-issuer"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+account_id = "9c7d20521f1e9099f117c083bba1db4e"
+
+[vars]
+TOKEN_TTL_SECONDS  = "3600"
+TURN_SERVER_HOST   = "shine-turn.fly.dev"   # update after `fly deploy`
+BUNDLE_HASH        = ""                      # injected by CI
+
+# Secrets — set via `wrangler secret put <NAME>`:
+#   ISSUER_SECRET              — 32-byte random key, also deployed to relay1
+#   AUTH_KEYS                  — newline-separated valid bearer credentials
+#   ISSUER_RSA_PRIVATE_KEY_JWK — from `deno run scripts/keygen.ts`
+#   TURN_SHARED_SECRET         — from `deno run scripts/keygen.ts`, also in fly secrets

@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.wrangler/
+.dev.vars
+.env
+.env.*
+!.env.example
+
+# Local tool caches and temporary deploy installers
+.DS_Store
+*.log
