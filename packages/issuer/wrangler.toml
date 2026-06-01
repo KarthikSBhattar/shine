@@ -2,6 +2,7 @@ name = "shine-issuer"
 main = "src/index.ts"
 compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
+account_id = "9c7d20521f1e9099f117c083bba1db4e"
 
 [vars]
 TOKEN_TTL_SECONDS  = "3600"
