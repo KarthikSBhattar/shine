@@ -77,6 +77,7 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git restore packages/relay1/wrangler.toml
           git fetch origin transparency-log:refs/remotes/origin/transparency-log 2>/dev/null || true
           if git show-ref --verify --quiet refs/remotes/origin/transparency-log; then
             git checkout -B transparency-log origin/transparency-log
