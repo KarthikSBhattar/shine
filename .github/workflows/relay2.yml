@@ -25,6 +25,9 @@ jobs:
         with:
           deno-version: v2.x
 
+      - name: Install dependencies
+        run: deno install
+
       - name: Type-check relay2
         run: deno check packages/relay2/src/main.ts
 

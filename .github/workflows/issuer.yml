@@ -29,11 +29,43 @@ jobs:
         id: build
         run: |
           cd packages/issuer
-          npx wrangler deploy --dry-run --outdir ../../dist/issuer 2>/dev/null || true
-          HASH=$(sha256sum ../../dist/issuer/index.js 2>/dev/null | awk '{print $1}' || echo "no-bundle")
+          npx wrangler deploy --dry-run --outdir ../../dist/issuer 2>/dev/null
+          HASH=$(sha256sum ../../dist/issuer/index.js | awk '{print $1}')
           echo "hash=$HASH" >> "$GITHUB_OUTPUT"
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+      - name: Deploy with injected bundle hash
+        run: |
+          cd packages/issuer
+          node - <<'NODE'
+          import fs from "node:fs";
+
+          const hash = process.env.RELAY_HASH;
+          const path = "wrangler.toml";
+          const text = fs.readFileSync(path, "utf8");
+          fs.writeFileSync(
+            path,
+            text.replace(/BUNDLE_HASH\s*=\s*"[^"]*"/, `BUNDLE_HASH        = "${hash}"`),
+          );
+          NODE
+          npx wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          RELAY_HASH: ${{ steps.build.outputs.hash }}
+
+      - name: Verify deployed hash
+        run: |
+          node - <<'NODE'
+          const url = "https://shine-issuer.workers.dev/healthz";
+          const expected = "${{ steps.build.outputs.hash }}";
+          const res = await fetch(url);
+          if (!res.ok) throw new Error(`healthz failed: ${res.status}`);
+          const body = await res.json();
+          if (body.hash !== expected) {
+            throw new Error(`issuer hash mismatch: healthz=${body.hash} expected=${expected}`);
+          }
+          NODE
 
       - name: Append to transparency log
         run: |
@@ -48,10 +80,3 @@ jobs:
           git commit -m "log: issuer ${{ github.sha }}"
           git push origin transparency-log
           git checkout main
-
-      - name: Deploy with injected bundle hash
-        run: |
-          cd packages/issuer
-          npx wrangler deploy --var "BUNDLE_HASH:${{ steps.build.outputs.hash }}"
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
