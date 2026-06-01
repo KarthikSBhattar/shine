@@ -1,0 +1,25 @@
+{
+  "name": "shine",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/relay1",
+    "packages/shared",
+    "packages/sdk",
+    "packages/issuer"
+  ],
+  "scripts": {
+    "keygen":          "deno run --allow-env scripts/keygen.ts",
+    "dev:relay1":      "npm -w packages/relay1 run dev",
+    "dev:issuer":      "npm -w packages/issuer run dev",
+    "test:local":      "bun run scripts/local-relay-test.ts",
+    "verify:relays":   "deno run --allow-net --allow-env scripts/verify-relays.ts",
+    "deploy:relay1":   "npm -w packages/relay1 run deploy",
+    "deploy:issuer":   "npm -w packages/issuer run deploy",
+    "typecheck":       "npm -w packages/relay1 run typecheck && npm -w packages/issuer run typecheck && npm -w packages/sdk run typecheck"
+  },
+  "devDependencies": {
+    "hpke-js": "^1.7.0",
+    "typescript": "^5.6.0"
+  }
+}

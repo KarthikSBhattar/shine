@@ -1,0 +1,44 @@
+app = "shine-turn"
+primary_region = "iad"
+kill_signal = "SIGTERM"
+kill_timeout = "5s"
+
+[build]
+  dockerfile = "Dockerfile"
+
+# Secrets (set via `fly secrets set <NAME>=<VALUE>`):
+#   TURN_SHARED_SECRET — same value as issuer's TURN_SHARED_SECRET
+#   TURN_EXTERNAL_IP   — the machine's dedicated IPv4 (fly ips list)
+#
+# Deploy with a dedicated IPv4 for TURN relay addresses:
+#   fly ips allocate-v4 --app shine-turn
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 3478
+  auto_stop_machines = false  # TURN must always be available for active calls
+  auto_start_machines = true
+
+  [[services.ports]]
+    port = 3478  # plain TURN/TCP
+
+  [[services.ports]]
+    port = 443   # TURNS (TLS terminated by Fly.io edge)
+    handlers = ["tls"]
+
+  [services.concurrency]
+    type       = "connections"
+    hard_limit = 1000
+    soft_limit = 800
+
+[[services]]
+  protocol = "udp"
+  internal_port = 3478
+
+  [[services.ports]]
+    port = 3478  # plain TURN/UDP
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1

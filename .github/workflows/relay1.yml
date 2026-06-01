@@ -1,0 +1,89 @@
+name: Deploy Relay1
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "packages/relay1/**"
+      - "packages/shared/**"
+      - ".github/workflows/relay1.yml"
+
+permissions:
+  contents: write # for transparency log commit
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history needed for log branch operations
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - run: npm install
+
+      - name: Build bundle and compute hash
+        id: build
+        run: |
+          cd packages/relay1
+          npx wrangler deploy --dry-run --outdir ../../dist/relay1 2>/dev/null
+          HASH=$(sha256sum ../../dist/relay1/index.js | awk '{print $1}')
+          echo "hash=$HASH" >> "$GITHUB_OUTPUT"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+      - name: Deploy with injected bundle hash
+        run: |
+          cd packages/relay1
+          npx wrangler deploy --var "BUNDLE_HASH:${{ steps.build.outputs.hash }}"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+      - name: Verify deployed hash
+        run: |
+          node - <<'NODE'
+          const url = "https://shine-relay1.ksb6007.workers.dev/healthz";
+          const expected = "${{ steps.build.outputs.hash }}";
+          const res = await fetch(url);
+          if (!res.ok) throw new Error(`healthz failed: ${res.status}`);
+          const body = await res.json();
+          if (body.hash !== expected) {
+            throw new Error(`relay1 hash mismatch: healthz=${body.hash} expected=${expected}`);
+          }
+          NODE
+
+      - name: Append to transparency log
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin transparency-log 2>/dev/null || true
+          git checkout transparency-log 2>/dev/null || git checkout --orphan transparency-log
+          ENTRY=$(node - <<'NODE'
+          const entry = {
+            relay: "relay1",
+            url: "https://shine-relay1.ksb6007.workers.dev",
+            commit: process.env.GITHUB_SHA,
+            hash: process.env.RELAY_HASH,
+            hash_algorithm: "sha256",
+            source_repository: process.env.GITHUB_REPOSITORY,
+            workflow_run_id: process.env.GITHUB_RUN_ID,
+            timestamp: new Date().toISOString(),
+          };
+          console.log(JSON.stringify(entry));
+          NODE
+          )
+          touch transparency-log.jsonl
+          grep -v "\"relay\":\"relay1\".*\"commit\":\"$GITHUB_SHA\"" transparency-log.jsonl > transparency-log.jsonl.tmp || true
+          mv transparency-log.jsonl.tmp transparency-log.jsonl
+          echo "$ENTRY" >> transparency-log.jsonl
+          git add transparency-log.jsonl
+          git commit -m "log: relay1 $GITHUB_SHA"
+          git push origin transparency-log
+        env:
+          RELAY_HASH: ${{ steps.build.outputs.hash }}

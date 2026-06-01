@@ -1,0 +1,10 @@
+{
+  "deploy": {
+    "org": "karthiksbhattar",
+    "app": "shine-relay2-live",
+    "runtime": {
+      "mode": "dynamic",
+      "entrypoint": "packages/relay2/src/main.ts"
+    }
+  }
+}
